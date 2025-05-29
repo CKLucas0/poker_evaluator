@@ -1,306 +1,256 @@
 <!DOCTYPE html>
 <html lang="nl">
 <head>
-<meta charset="UTF-8" />
-<title>Texas Hold'em vs AI</title>
-<style>
-  body { font-family: sans-serif; background: #222; color: white; max-width: 900px; margin: auto; padding: 20px; }
-  .cards { display: flex; gap: 10px; margin-bottom: 10px; }
-  .card { width: 70px; height: 100px; border-radius: 8px; background-size: cover; box-shadow: 0 0 5px #000; }
-  #log { background: #333; padding: 10px; min-height: 100px; overflow-y: auto; margin-top: 15px; white-space: pre-wrap; }
-  button { margin-top: 10px; padding: 10px 15px; font-size: 16px; cursor: pointer; }
-  #actions button { margin-right: 10px; }
-</style>
+  <meta charset="UTF-8" />
+  <title>Texas Hold'em Winnaarbepaler</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #2e2e2e;
+      color: white;
+      padding: 20px;
+    }
+    h2, h3 {
+      margin-bottom: 10px;
+      color: #ffc107;
+    }
+    .cards {
+      display: flex;
+      gap: 10px;
+      overflow-x: auto;
+      background: #3e3e3e;
+      padding: 10px;
+      border-radius: 8px;
+    }
+    .card {
+      width: 80px;
+      height: auto;
+      border: 2px solid transparent;
+      border-radius: 5px;
+      cursor: pointer;
+      user-select: none;
+      transition: border-color 0.2s;
+    }
+    .card.selected {
+      border-color: #ff5722;
+    }
+    button {
+      margin-top: 15px;
+      padding: 12px 24px;
+      font-size: 18px;
+      background-color: #28a745;
+      border: none;
+      border-radius: 6px;
+      color: white;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #218838;
+    }
+    #result {
+      margin-top: 20px;
+      font-size: 20px;
+      color: #00e676;
+      text-align: center;
+    }
+  </style>
 </head>
 <body>
 
-<h1>Texas Hold'em tegen AI</h1>
+<h2>Texas Hold'em Winnaarbepaler</h2>
+
+<label>Aantal spelers: <input type="number" id="playerCount" value="2" min="2" max="9" /></label>
+<button onclick="createPlayerZones()">Start spel</button>
+
+<div id="playersContainer"></div>
 
 <div>
-  <strong>Jouw kaarten:</strong>
-  <div id="playerCards" class="cards"></div>
-</div>
-
-<div>
-  <strong>Board:</strong>
-  <div id="boardCards" class="cards"></div>
-</div>
-
-<div>
-  <strong>AI kaarten:</strong>
-  <div id="aiCards" class="cards"></div>
+  <h3>Board (5 kaarten)</h3>
+  <div id="board" class="cards"></div>
 </div>
 
 <div>
-  <p>Pot: <span id="pot">0</span> | Jouw geld: <span id="playerMoney">1000</span> | AI geld: <span id="aiMoney">1000</span></p>
+  <h3>Kaart Selectie (klik om toe te voegen)</h3>
+  <div id="cardPicker" class="cards"></div>
 </div>
 
-<div id="actions">
-  <button id="btnCheck" disabled>Check</button>
-  <button id="btnCall" disabled>Call</button>
-  <button id="btnRaise" disabled>Raise 50</button>
-  <button id="btnFold" disabled>Fold</button>
-</div>
-
-<div id="log"></div>
+<button onclick="evaluateWinner()">Bepaal Winnaar</button>
+<div id="result"></div>
 
 <script>
-const ranks = ['2','3','4','5','6','7','8','9','T','J','Q','K','A'];
-const suits = ['S','H','D','C'];
-const deck = [];
+  const ranks = ['2','3','4','5','6','7','8','9','T','J','Q','K','A'];
+  const suits = ['S','H','D','C'];
+  const allCards = ranks.flatMap(r => suits.map(s => r + s));
+  const zones = { board: [] };
+  let playerCount = 2;
 
-let playerHand = [];
-let aiHand = [];
-let board = [];
-let pot = 0;
-let playerMoney = 1000;
-let aiMoney = 1000;
+  const boardDiv = document.getElementById('board');
+  const cardPicker = document.getElementById('cardPicker');
+  const playersContainer = document.getElementById('playersContainer');
+  const resultDiv = document.getElementById('result');
 
-let currentBet = 0;
-let playerToAct = true;  // true = speler, false = AI
-let gamePhase = 'preflop'; // preflop, flop, turn, river, showdown
+  function cardImgUrl(code) {
+    const rank = code[0] === 'T' ? '0' : code[0];
+    return `https://deckofcardsapi.com/static/img/${rank}${code[1]}.png`;
+  }
 
-const playerCardsDiv = document.getElementById('playerCards');
-const aiCardsDiv = document.getElementById('aiCards');
-const boardCardsDiv = document.getElementById('boardCards');
-const potSpan = document.getElementById('pot');
-const playerMoneySpan = document.getElementById('playerMoney');
-const aiMoneySpan = document.getElementById('aiMoney');
-const logDiv = document.getElementById('log');
-
-const btnCheck = document.getElementById('btnCheck');
-const btnCall = document.getElementById('btnCall');
-const btnRaise = document.getElementById('btnRaise');
-const btnFold = document.getElementById('btnFold');
-
-function log(text) {
-  logDiv.textContent += text + '\n';
-  logDiv.scrollTop = logDiv.scrollHeight;
-}
-
-function createDeck() {
-  deck.length = 0;
-  for (const r of ranks) {
-    for (const s of suits) {
-      deck.push(r + s);
+  function renderZone(zone) {
+    const div = document.getElementById(zone);
+    div.innerHTML = '';
+    for (const card of zones[zone]) {
+      const img = document.createElement('img');
+      img.src = cardImgUrl(card);
+      img.className = 'card selected';
+      div.appendChild(img);
     }
   }
-}
 
-function shuffleDeck() {
-  for (let i = deck.length -1; i>0; i--) {
-    const j = Math.floor(Math.random()*(i+1));
-    [deck[i], deck[j]] = [deck[j], deck[i]];
+  function isCardUsed(code) {
+    return Object.values(zones).some(z => z.includes(code));
   }
-}
 
-function cardImgUrl(code) {
-  const rank = code[0] === 'T' ? '0' : code[0];
-  return `https://deckofcardsapi.com/static/img/${rank}${code[1]}.png`;
-}
-
-function showCards(cards, div, hide=false) {
-  div.innerHTML = '';
-  for(const c of cards) {
-    const cardDiv = document.createElement('div');
-    cardDiv.className = 'card';
-    if(hide) {
-      cardDiv.style.backgroundImage = `url(https://upload.wikimedia.org/wikipedia/commons/thumb/5/54/Card_back_01.svg/1024px-Card_back_01.svg.png)`;
-    } else {
-      cardDiv.style.backgroundImage = `url(${cardImgUrl(c)})`;
-    }
-    div.appendChild(cardDiv);
-  }
-}
-
-function startHand() {
-  gamePhase = 'preflop';
-  pot = 0;
-  currentBet = 0;
-  playerToAct = true;
-  playerHand = [];
-  aiHand = [];
-  board = [];
-  createDeck();
-  shuffleDeck();
-  playerHand.push(deck.pop());
-  playerHand.push(deck.pop());
-  aiHand.push(deck.pop());
-  aiHand.push(deck.pop());
-  updateDisplay();
-  log('Nieuwe hand begonnen.');
-  log(`Jij krijgt: ${playerHand.join(', ')}`);
-  log('AI heeft zijn kaarten gekregen.');
-  showCards(playerHand, playerCardsDiv);
-  showCards(aiHand, aiCardsDiv, true);
-  showCards(board, boardCardsDiv);
-  updateButtons();
-}
-
-function updateDisplay() {
-  potSpan.textContent = pot;
-  playerMoneySpan.textContent = playerMoney;
-  aiMoneySpan.textContent = aiMoney;
-  showCards(board, boardCardsDiv);
-}
-
-function updateButtons() {
-  btnCheck.disabled = !playerToAct;
-  btnCall.disabled = !playerToAct || currentBet === 0;
-  btnRaise.disabled = !playerToAct || playerMoney < 50;
-  btnFold.disabled = !playerToAct;
-}
-
-btnCheck.onclick = () => {
-  if (!playerToAct) return;
-  log("Jij checkt.");
-  playerToAct = false;
-  aiAct();
-};
-
-btnCall.onclick = () => {
-  if (!playerToAct || currentBet === 0) return;
-  const callAmount = currentBet;
-  if (playerMoney < callAmount) {
-    log('Niet genoeg geld om te callen!');
-    return;
-  }
-  playerMoney -= callAmount;
-  pot += callAmount;
-  log(`Jij callt ${callAmount}.`);
-  currentBet = 0;
-  playerToAct = false;
-  updateDisplay();
-  updateButtons();
-  aiAct();
-};
-
-btnRaise.onclick = () => {
-  if (!playerToAct) return;
-  if (playerMoney < 50) {
-    log('Niet genoeg geld om te raisen!');
-    return;
-  }
-  playerMoney -= 50;
-  pot += 50;
-  currentBet = 50;
-  log('Jij raiset 50.');
-  playerToAct = false;
-  updateDisplay();
-  updateButtons();
-  aiAct();
-};
-
-btnFold.onclick = () => {
-  if (!playerToAct) return;
-  log('Jij fold.');
-  endHand('ai');
-};
-
-function aiAct() {
-  setTimeout(() => {
-    if (gamePhase === 'preflop') {
-      // Simpele AI: call als currentBet > 0, anders check
-      if (currentBet > 0) {
-        if (aiMoney >= currentBet) {
-          aiMoney -= currentBet;
-          pot += currentBet;
-          log(`AI callt ${currentBet}.`);
-          currentBet = 0;
-          updateDisplay();
-          nextPhase();
-        } else {
-          log('AI fold.');
-          endHand('player');
-        }
-      } else {
-        log('AI checkt.');
-        nextPhase();
-      }
-    } else {
-      // Na preflop, AI checkt altijd, of callt raise (als er is)
-      if (currentBet > 0) {
-        if (aiMoney >= currentBet) {
-          aiMoney -= currentBet;
-          pot += currentBet;
-          log(`AI callt ${currentBet}.`);
-          currentBet = 0;
-          updateDisplay();
-          nextPhase();
-        } else {
-          log('AI fold.');
-          endHand('player');
-        }
-      } else {
-        log('AI checkt.');
-        nextPhase();
+  function addCard(code, imgElem) {
+    if (isCardUsed(code)) return alert('Kaart is al gekozen!');
+    for (let i = 0; i < playerCount; i++) {
+      const zoneKey = `player${i+1}`;
+      if (zones[zoneKey].length < 2) {
+        zones[zoneKey].push(code);
+        renderZone(zoneKey);
+        imgElem.classList.add('selected');
+        return;
       }
     }
-    updateButtons();
-    playerToAct = true;
-  }, 1500);
-}
-
-function nextPhase() {
-  if (gamePhase === 'preflop') {
-    // flop: 3 kaarten
-    board.push(deck.pop());
-    board.push(deck.pop());
-    board.push(deck.pop());
-    gamePhase = 'flop';
-    log('Flop: ' + board.join(', '));
-  } else if (gamePhase === 'flop') {
-    board.push(deck.pop());
-    gamePhase = 'turn';
-    log('Turn: ' + board[3]);
-  } else if (gamePhase === 'turn') {
-    board.push(deck.pop());
-    gamePhase = 'river';
-    log('River: ' + board[4]);
-  } else if (gamePhase === 'river') {
-    gamePhase = 'showdown';
-    showdown();
+    if (zones.board.length < 5) {
+      zones.board.push(code);
+      renderZone('board');
+      imgElem.classList.add('selected');
+    }
   }
-  updateDisplay();
-}
 
-function evaluateHand(cards) {
-  // Eenvoudige score: som van rank values
-  const rankValues = { '2':2, '3':3, '4':4, '5':5, '6':6, '7':7, '8':8, '9':9, 'T':10, 'J':11, 'Q':12, 'K':13, 'A':14 };
-  let sum = 0;
-  for (const c of cards) {
-    sum += rankValues[c[0]];
+  function initCardPicker() {
+    cardPicker.innerHTML = '';
+    for (const code of allCards) {
+      const img = document.createElement('img');
+      img.src = cardImgUrl(code);
+      img.className = 'card';
+      img.dataset.code = code;
+      img.onclick = () => addCard(code, img);
+      cardPicker.appendChild(img);
+    }
   }
-  return sum;
-}
 
-function showdown() {
-  showCards(aiHand, aiCardsDiv, false); // toon AI kaarten
-  log('Showdown!');
-  const playerScore = evaluateHand(playerHand.concat(board));
-  const aiScore = evaluateHand(aiHand.concat(board));
-  log(`Jij: ${playerHand.join(', ')} + board => score: ${playerScore}`);
-  log(`AI: ${aiHand.join(', ')} + board => score: ${aiScore}`);
-  if (playerScore > aiScore) {
-    log('Jij wint deze hand!');
-    playerMoney += pot;
-  } else if (playerScore < aiScore) {
-    log('AI wint deze hand.');
-    aiMoney += pot;
-  } else {
-    log('Gelijkspel, pot wordt verdeeld.');
-    playerMoney += pot/2;
-    aiMoney += pot/2;
+  function createPlayerZones() {
+    playerCount = parseInt(document.getElementById('playerCount').value);
+    playersContainer.innerHTML = '';
+    for (let i = 1; i <= playerCount; i++) {
+      const div = document.createElement('div');
+      div.innerHTML = `<h3>Speler ${i}</h3><div id="player${i}" class="cards"></div>`;
+      playersContainer.appendChild(div);
+      zones[`player${i}`] = [];
+    }
+    zones.board = [];
+    boardDiv.innerHTML = '';
+    initCardPicker();
+    resultDiv.textContent = '';
   }
-  pot = 0;
-  updateDisplay();
-  updateButtons();
-  setTimeout(() => {
-    startHand();
-  }, 5000);
-}
 
-startHand();
+  function evaluateWinner() {
+    if (zones.board.length < 5) return alert('Vul 5 boardkaarten in!');
+    const results = [];
+    for (let i = 1; i <= playerCount; i++) {
+      const playerCards = zones[`player${i}`];
+      if (playerCards.length < 2) return alert(`Speler ${i} heeft niet genoeg kaarten`);
+      const fullHand = [...playerCards, ...zones.board];
+      const evaluation = evaluateHand(fullHand);
+      results.push({ player: i, ...evaluation });
+    }
+    results.sort((a, b) => b.score - a.score);
+    const bestScore = results[0].score;
+    const winners = results.filter(r => r.score === bestScore);
+    if (winners.length === 1) {
+      resultDiv.textContent = `🏆 Speler ${winners[0].player} wint met ${winners[0].desc}`;
+    } else {
+      const players = winners.map(w => `Speler ${w.player}`).join(' & ');
+      resultDiv.textContent = `🤝 Gelijkspel tussen ${players} met ${winners[0].desc}`;
+    }
+  }
+
+  // -- Evalueer pokerhand: (zelfde als jouw bestaande logica)
+  function evaluateHand(cards) {
+    const rankValues = { '2':2, '3':3, '4':4, '5':5, '6':6, '7':7, '8':8, '9':9, 'T':10, 'J':11, 'Q':12, 'K':13, 'A':14 };
+    let ranksCount = {}, suitsCount = {}, ranksList = [];
+    for (const c of cards) {
+      const [r, s] = [c[0], c[1]];
+      ranksCount[r] = (ranksCount[r] || 0) + 1;
+      suitsCount[s] = (suitsCount[s] || 0) + 1;
+      ranksList.push(rankValues[r]);
+    }
+    ranksList.sort((a,b)=>b-a);
+    const flush = Object.values(suitsCount).some(v => v >= 5);
+    const straightHigh = getStraightHigh(ranksList);
+    let straightFlushHigh = null;
+    if (flush) {
+      for (const suit in suitsCount) {
+        if (suitsCount[suit] >= 5) {
+          const suitedRanks = cards.filter(c => c[1] === suit).map(c => rankValues[c[0]]).sort((a,b)=>b-a);
+          straightFlushHigh = getStraightHigh(suitedRanks);
+          if (straightFlushHigh) break;
+        }
+      }
+    }
+    let score = 0, desc = 'High Card';
+    if (straightFlushHigh) {
+      score = 9000 + straightFlushHigh; desc = `Straight Flush tot ${valueToRank(straightFlushHigh)}`;
+    } else if (Object.values(ranksCount).includes(4)) {
+      const q = getRankByCount(ranksCount,4);
+      score = 8000 + rankValues[q]; desc = `Four of a Kind van ${q}s`;
+    } else if (Object.values(ranksCount).includes(3) && Object.values(ranksCount).includes(2)) {
+      const t = getRankByCount(ranksCount,3), p = getRankByCount(ranksCount,2);
+      score = 7000 + rankValues[t]*15 + rankValues[p]; desc = `Full House: ${t}s over ${p}s`;
+    } else if (flush) {
+      score = 6000 + Math.max(...ranksList); desc = `Flush met hoogste kaart ${valueToRank(Math.max(...ranksList))}`;
+    } else if (straightHigh) {
+      score = 5000 + straightHigh; desc = `Straight tot ${valueToRank(straightHigh)}`;
+    } else if (Object.values(ranksCount).includes(3)) {
+      const t = getRankByCount(ranksCount,3);
+      score = 4000 + rankValues[t]; desc = `Three of a Kind van ${t}s`;
+    } else {
+      const pairs = getRanksByCount(ranksCount, 2).sort((a,b) => rankValues[b]-rankValues[a]);
+      if (pairs.length >= 2) {
+        score = 2000 + rankValues[pairs[0]]*15 + rankValues[pairs[1]];
+        desc = `Two Pair: ${pairs[0]}s en ${pairs[1]}s`;
+      } else if (pairs.length === 1) {
+        score = 1000 + rankValues[pairs[0]];
+        desc = `Pair van ${pairs[0]}s`;
+      } else {
+        score = ranksList[0]; desc = `High Card: ${valueToRank(ranksList[0])}`;
+      }
+    }
+    return {score, desc};
+  }
+
+  function getRankByCount(obj, count) {
+    return Object.keys(obj).find(r => obj[r] === count);
+  }
+  function getRanksByCount(obj, count) {
+    return Object.keys(obj).filter(r => obj[r] === count);
+  }
+  function getStraightHigh(ranks) {
+    const r = [...new Set(ranks)].sort((a,b)=>b-a);
+    if (r.includes(14)) r.push(1);
+    for (let i = 0; i <= r.length - 5; i++) {
+      if (r.slice(i, i+5).every((val, idx, arr) => idx === 0 || arr[idx-1]-1 === val)) return r[i];
+    }
+    return null;
+  }
+  function valueToRank(v) {
+    return Object.entries({'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'T':10,'J':11,'Q':12,'K':13,'A':14})
+      .find(([k,val]) => val === v)?.[0] || '?';
+  }
+
+  // Init default 2 spelers
+  createPlayerZones();
+
 </script>
 
 </body>
