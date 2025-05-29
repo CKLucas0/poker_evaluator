@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<title>Texas Hold'em vs AI</title>
+<style>
+  body { font-family: sans-serif; background: #222; color: white; max-width: 900px; margin: auto; padding: 20px; }
+  .cards { display: flex; gap: 10px; margin-bottom: 10px; }
+  .card { width: 70px; height: 100px; border-radius: 8px; background-size: cover; box-shadow: 0 0 5px #000; }
+  #log { background: #333; padding: 10px; min-height: 100px; overflow-y: auto; margin-top: 15px; white-space: pre-wrap; }
+  button { margin-top: 10px; padding: 10px 15px; font-size: 16px; cursor: pointer; }
+  #actions button { margin-right: 10px; }
+</style>
+</head>
+<body>
+
+<h1>Texas Hold'em tegen AI</h1>
+
+<div>
+  <strong>Jouw kaarten:</strong>
+  <div id="playerCards" class="cards"></div>
+</div>
+
+<div>
+  <strong>Board:</strong>
+  <div id="boardCards" class="cards"></div>
+</div>
+
+<div>
+  <strong>AI kaarten:</strong>
+  <div id="aiCards" class="cards"></div>
+</div>
+
+<div>
+  <p>Pot: <span id="pot">0</span> | Jouw geld: <span id="playerMoney">1000</span> | AI geld: <span id="aiMoney">1000</span></p>
+</div>
+
+<div id="actions">
+  <button id="btnCheck" disabled>Check</button>
+  <button id="btnCall" disabled>Call</button>
+  <button id="btnRaise" disabled>Raise 50</button>
+  <button id="btnFold" disabled>Fold</button>
+</div>
+
+<div id="log"></div>
+
+<script>
+const ranks = ['2','3','4','5','6','7','8','9','T','J','Q','K','A'];
+const suits = ['S','H','D','C'];
+const deck = [];
+
+let playerHand = [];
+let aiHand = [];
+let board = [];
+let pot = 0;
+let playerMoney = 1000;
+let aiMoney = 1000;
+
+let currentBet = 0;
+let playerToAct = true;  // true = speler, false = AI
+let gamePhase = 'preflop'; // preflop, flop, turn, river, showdown
+
+const playerCardsDiv = document.getElementById('playerCards');
+const aiCardsDiv = document.getElementById('aiCards');
+const boardCardsDiv = document.getElementById('boardCards');
+const potSpan = document.getElementById('pot');
+const playerMoneySpan = document.getElementById('playerMoney');
+const aiMoneySpan = document.getElementById('aiMoney');
+const logDiv = document.getElementById('log');
+
+const btnCheck = document.getElementById('btnCheck');
+const btnCall = document.getElementById('btnCall');
+const btnRaise = document.getElementById('btnRaise');
+const btnFold = document.getElementById('btnFold');
+
+function log(text) {
+  logDiv.textContent += text + '\n';
+  logDiv.scrollTop = logDiv.scrollHeight;
+}
+
+function createDeck() {
+  deck.length = 0;
+  for (const r of ranks) {
+    for (const s of suits) {
+      deck.push(r + s);
+    }
+  }
+}
+
+function shuffleDeck() {
+  for (let i = deck.length -1; i>0; i--) {
+    const j = Math.floor(Math.random()*(i+1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+}
+
+function cardImgUrl(code) {
+  const rank = code[0] === 'T' ? '0' : code[0];
+  return `https://deckofcardsapi.com/static/img/${rank}${code[1]}.png`;
+}
+
+function showCards(cards, div, hide=false) {
+  div.innerHTML = '';
+  for(const c of cards) {
+    const cardDiv = document.createElement('div');
+    cardDiv.className = 'card';
+    if(hide) {
+      cardDiv.style.backgroundImage = `url(https://upload.wikimedia.org/wikipedia/commons/thumb/5/54/Card_back_01.svg/1024px-Card_back_01.svg.png)`;
+    } else {
+      cardDiv.style.backgroundImage = `url(${cardImgUrl(c)})`;
+    }
+    div.appendChild(cardDiv);
+  }
+}
+
+function startHand() {
+  gamePhase = 'preflop';
+  pot = 0;
+  currentBet = 0;
+  playerToAct = true;
+  playerHand = [];
+  aiHand = [];
+  board = [];
+  createDeck();
+  shuffleDeck();
+  playerHand.push(deck.pop());
+  playerHand.push(deck.pop());
+  aiHand.push(deck.pop());
+  aiHand.push(deck.pop());
+  updateDisplay();
+  log('Nieuwe hand begonnen.');
+  log(`Jij krijgt: ${playerHand.join(', ')}`);
+  log('AI heeft zijn kaarten gekregen.');
+  showCards(playerHand, playerCardsDiv);
+  showCards(aiHand, aiCardsDiv, true);
+  showCards(board, boardCardsDiv);
+  updateButtons();
+}
+
+function updateDisplay() {
+  potSpan.textContent = pot;
+  playerMoneySpan.textContent = playerMoney;
+  aiMoneySpan.textContent = aiMoney;
+  showCards(board, boardCardsDiv);
+}
+
+function updateButtons() {
+  btnCheck.disabled = !playerToAct;
+  btnCall.disabled = !playerToAct || currentBet === 0;
+  btnRaise.disabled = !playerToAct || playerMoney < 50;
+  btnFold.disabled = !playerToAct;
+}
+
+btnCheck.onclick = () => {
+  if (!playerToAct) return;
+  log("Jij checkt.");
+  playerToAct = false;
+  aiAct();
+};
+
+btnCall.onclick = () => {
+  if (!playerToAct || currentBet === 0) return;
+  const callAmount = currentBet;
+  if (playerMoney < callAmount) {
+    log('Niet genoeg geld om te callen!');
+    return;
+  }
+  playerMoney -= callAmount;
+  pot += callAmount;
+  log(`Jij callt ${callAmount}.`);
+  currentBet = 0;
+  playerToAct = false;
+  updateDisplay();
+  updateButtons();
+  aiAct();
+};
+
+btnRaise.onclick = () => {
+  if (!playerToAct) return;
+  if (playerMoney < 50) {
+    log('Niet genoeg geld om te raisen!');
+    return;
+  }
+  playerMoney -= 50;
+  pot += 50;
+  currentBet = 50;
+  log('Jij raiset 50.');
+  playerToAct = false;
+  updateDisplay();
+  updateButtons();
+  aiAct();
+};
+
+btnFold.onclick = () => {
+  if (!playerToAct) return;
+  log('Jij fold.');
+  endHand('ai');
+};
+
+function aiAct() {
+  setTimeout(() => {
+    if (gamePhase === 'preflop') {
+      // Simpele AI: call als currentBet > 0, anders check
+      if (currentBet > 0) {
+        if (aiMoney >= currentBet) {
+          aiMoney -= currentBet;
+          pot += currentBet;
+          log(`AI callt ${currentBet}.`);
+          currentBet = 0;
+          updateDisplay();
+          nextPhase();
+        } else {
+          log('AI fold.');
+          endHand('player');
+        }
+      } else {
+        log('AI checkt.');
+        nextPhase();
+      }
+    } else {
+      // Na preflop, AI checkt altijd, of callt raise (als er is)
+      if (currentBet > 0) {
+        if (aiMoney >= currentBet) {
+          aiMoney -= currentBet;
+          pot += currentBet;
+          log(`AI callt ${currentBet}.`);
+          currentBet = 0;
+          updateDisplay();
+          nextPhase();
+        } else {
+          log('AI fold.');
+          endHand('player');
+        }
+      } else {
+        log('AI checkt.');
+        nextPhase();
+      }
+    }
+    updateButtons();
+    playerToAct = true;
+  }, 1500);
+}
+
+function nextPhase() {
+  if (gamePhase === 'preflop') {
+    // flop: 3 kaarten
+    board.push(deck.pop());
+    board.push(deck.pop());
+    board.push(deck.pop());
+    gamePhase = 'flop';
+    log('Flop: ' + board.join(', '));
+  } else if (gamePhase === 'flop') {
+    board.push(deck.pop());
+    gamePhase = 'turn';
+    log('Turn: ' + board[3]);
+  } else if (gamePhase === 'turn') {
+    board.push(deck.pop());
+    gamePhase = 'river';
+    log('River: ' + board[4]);
+  } else if (gamePhase === 'river') {
+    gamePhase = 'showdown';
+    showdown();
+  }
+  updateDisplay();
+}
+
+function evaluateHand(cards) {
+  // Eenvoudige score: som van rank values
+  const rankValues = { '2':2, '3':3, '4':4, '5':5, '6':6, '7':7, '8':8, '9':9, 'T':10, 'J':11, 'Q':12, 'K':13, 'A':14 };
+  let sum = 0;
+  for (const c of cards) {
+    sum += rankValues[c[0]];
+  }
+  return sum;
+}
+
+function showdown() {
+  showCards(aiHand, aiCardsDiv, false); // toon AI kaarten
+  log('Showdown!');
+  const playerScore = evaluateHand(playerHand.concat(board));
+  const aiScore = evaluateHand(aiHand.concat(board));
+  log(`Jij: ${playerHand.join(', ')} + board => score: ${playerScore}`);
+  log(`AI: ${aiHand.join(', ')} + board => score: ${aiScore}`);
+  if (playerScore > aiScore) {
+    log('Jij wint deze hand!');
+    playerMoney += pot;
+  } else if (playerScore < aiScore) {
+    log('AI wint deze hand.');
+    aiMoney += pot;
+  } else {
+    log('Gelijkspel, pot wordt verdeeld.');
+    playerMoney += pot/2;
+    aiMoney += pot/2;
+  }
+  pot = 0;
+  updateDisplay();
+  updateButtons();
+  setTimeout(() => {
+    startHand();
+  }, 5000);
+}
+
+startHand();
+</script>
+
+</body>
+</html>
